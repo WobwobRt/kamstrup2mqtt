@@ -5,5 +5,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY daemon.py /opt/kamstrup/
 COPY kamstrup_meter.py /opt/kamstrup/
 COPY mqtt_handler.py /opt/kamstrup/
+RUN chmod 644 /opt/kamstrup/daemon.py
 RUN mkdir /opt/kamstrup/logs
 CMD [ "python", "/opt/kamstrup/daemon.py" ]

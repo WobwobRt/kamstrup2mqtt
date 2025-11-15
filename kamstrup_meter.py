@@ -10,6 +10,7 @@
 # Modified by Frank Reijn and Paul Bonnemaijers for Kamstrup Multical 402
 # Modified by Matthijs Visser, refactored and simplified code
 
+import asyncio
 import serial
 import math
 import sys
@@ -89,8 +90,8 @@ class kamstrup(object):
 		self.parameters = parameters
 
 		try:
-			self.serial = serial.Serial(
-				port = self.serial_port,
+			self.serial = serial.serial_for_url(
+				url=self.serial_port,
 				baudrate = 1200,
 				parity = serial.PARITY_NONE,
 				stopbits = serial.STOPBITS_TWO,

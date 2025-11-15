@@ -16,6 +16,7 @@ mqtt:
     # tls_insecure: True
     # tls_version: ssl.PROTOCOL_TLSv1_2
 serial_device:
+    url: http://10.10.3.14:2003
     com_port: /dev/ttyKamstrup
 kamstrup:
     parameters:

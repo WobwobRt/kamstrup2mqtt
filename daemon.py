@@ -48,7 +48,14 @@ class KamstrupDaemon(multiprocessing.Process):
 		self.mqtt_handler.connect()
 		self.mqtt_handler.loop_start()
 
-		self.heat_meter = kamstrup(serial_cfg["com_port"], kamstrup_cfg["parameters"])
+		if "url" in serial_cfg and serial_cfg["url"]:
+			log.info(f"Connecting to Kamstrup meter via network URL: {serial_cfg['url']}")
+			self.heat_meter = kamstrup(serial_cfg["url"],kamstrup_cfg["parameters"])
+		elif "com_port" in serial_cfg and serial_cfg["com_port"]:
+			log.info(f"Connecting to Kamstrup meter via serial port: {serial_cfg['com_port']}")
+			self.heat_meter = kamstrup(serial_cfg["com_port"], kamstrup_cfg["parameters"])
+		else:
+			raise ValueError("No valid serial connection specified in configuration (expected 'url' or 'com_port').")
 	
 	def signal_handler(self, signal, handler):
 		self.running = False
