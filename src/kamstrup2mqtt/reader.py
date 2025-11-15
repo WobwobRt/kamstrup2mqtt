@@ -21,8 +21,8 @@ import logging
 import time
 from logging.handlers import TimedRotatingFileHandler
 
-log = logging.getLogger("log")
-log.setLevel(logging.INFO)
+log = logging.getLogger(__name__)
+# log.setLevel(logging.INFO)
 
 kamstrup_402_params = {
 	"energy"	    : 0x3C,
@@ -83,7 +83,7 @@ escapes = {
 	0x80: True,
 }
 
-class kamstrup(object):
+class kamstrup_parser(object):
 
 	def __init__ (self, port, parameters):
 		self.serial_port = port

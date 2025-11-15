@@ -1,8 +1,1 @@
-*.log
-*.log*
-log
-.db
-*.pyc
-config.yaml
-ca.crt
-docker-compose.yml
+__pycache__/
