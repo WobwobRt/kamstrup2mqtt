@@ -3,6 +3,8 @@ mqtt:
     port: 1883
     client: kamstrup
     topic: kamstrup
+    device_id: kamstrup_meter
+    device_name: Kamstrup Meter
     qos: 0
     retain: False
     authentication: False
@@ -24,3 +26,27 @@ kamstrup:
     - temp1
     - temp2
     poll_interval: 28
+logging:
+    level: INFO
+    destinations:
+      - stdout
+      # - file
+      # - syslog
+    # File logging settings
+    directory: logs
+    filename: debug.log
+    rotate_when: d
+    rotate_interval: 1
+    backup_count: 5
+    file_format: "[%(asctime)s %(filename)s %(funcName)s:%(lineno)d] %(levelname)s %(message)s"
+    file_date_format: "%Y-%m-%d %H:%M:%S"
+    # Stdout/Docker logging settings (RFC5424 compatible with ISO 8601 timestamps)
+    stdout_format: "%(asctime)s [%(name)s] %(levelname)s %(message)s"
+    stdout_date_format: "%Y-%m-%dT%H:%M:%S%z"
+    # Syslog settings (RFC5424 format)
+    syslog_facility: local0
+    syslog_address: /dev/log
+    syslog_format: "%(name)s[%(process)d]: %(levelname)s %(message)s"
+# Home Assistant MQTT Discovery
+homeassistant:
+    discovery_prefix: homeassistant

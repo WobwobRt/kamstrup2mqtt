@@ -8,7 +8,7 @@ import logging
 import multiprocessing
 import time
 
-from kamstrup2mqtt.config import load_config
+from kamstrup2mqtt.config import load_config, get_mqtt_config, get_serial_config, get_kamstrup_config, KAMSTRUP_PARAM_META
 from kamstrup2mqtt.reader import kamstrup_parser
 from kamstrup2mqtt.mqtt import mqtt_handler
 
@@ -33,9 +33,10 @@ class KamstrupDaemon(multiprocessing.Process):
             log.error(f"Failed to load configuration: {e}")
             raise
 
-        self.mqtt_cfg = self.config.get("mqtt", {})
-        self.serial_cfg = self.config.get("serial_device", {})
-        self.kamstrup_cfg = self.config.get("kamstrup", {})
+        # Extract and transform configuration
+        self.mqtt_cfg = get_mqtt_config(self.config)
+        self.serial_cfg = get_serial_config(self.config)
+        self.kamstrup_cfg = get_kamstrup_config(self.config)
         self.poll_interval = self.kamstrup_cfg.get("poll_interval", 5)
 
         # Register signal handlers
@@ -50,7 +51,6 @@ class KamstrupDaemon(multiprocessing.Process):
         try:
             self.mqtt_handler_instance = mqtt_handler(self.mqtt_cfg)
             self.mqtt_handler_instance.connect()
-            self.mqtt_handler_instance.loop_start()
             log.info("MQTT handler initialized successfully")
         except Exception as e:
             log.error(f"Failed to initialize MQTT handler: {e}")
@@ -58,17 +58,23 @@ class KamstrupDaemon(multiprocessing.Process):
     def _initialize_heat_meter(self):
         """Initialize heat meter connection."""
         try:
+            # Determine version from kamstrup config (falls back to env var or default inside reader)
+            version = self.kamstrup_cfg.get("version")
+            params = self.kamstrup_cfg.get("parameters", [])
+
             if "url" in self.serial_cfg and self.serial_cfg["url"]:
-                log.info(f"Connecting to Kamstrup meter via network URL: {self.serial_cfg['url']}")
+                log.info(f"Connecting to Kamstrup meter via network URL: {self.serial_cfg['url']} (version={version})")
                 self.heat_meter = kamstrup_parser(
-                    self.serial_cfg["url"], 
-                    self.kamstrup_cfg.get("parameters", [])
+                    self.serial_cfg["url"],
+                    parameters=params,
+                    version=version
                 )
             elif "com_port" in self.serial_cfg and self.serial_cfg["com_port"]:
-                log.info(f"Connecting to Kamstrup meter via serial port: {self.serial_cfg['com_port']}")
+                log.info(f"Connecting to Kamstrup meter via serial port: {self.serial_cfg['com_port']} (version={version})")
                 self.heat_meter = kamstrup_parser(
-                    self.serial_cfg["com_port"], 
-                    self.kamstrup_cfg.get("parameters", [])
+                    self.serial_cfg["com_port"],
+                    parameters=params,
+                    version=version
                 )
             else:
                 log.error("No valid serial connection specified in configuration "
@@ -106,13 +112,26 @@ class KamstrupDaemon(multiprocessing.Process):
 
         log.info("Daemon started successfully")
         
+        # Publish Home Assistant discovery on startup (once connected)
+        ha_discovery_published = False
+        
         try:
             while self.running:
                 try:
+                    # Publish HA discovery once after first successful connection
+                    if not ha_discovery_published and self.mqtt_handler_instance and self.mqtt_handler_instance.is_connected:
+                        ha_prefix = self.config.get("homeassistant", {}).get("discovery_prefix", "homeassistant")
+                        self.mqtt_handler_instance.publish_ha_discovery(
+                            ha_prefix=ha_prefix,
+                            param_meta=KAMSTRUP_PARAM_META
+                        )
+                        ha_discovery_published = True
+                        log.info("Home Assistant discovery published")
+                    
                     values = self.heat_meter.run()
                     if self.mqtt_handler_instance and values:
-                        message = str(values).replace("'", "\"")
-                        self.mqtt_handler_instance.publish("values", message)
+                        # Publish individual metrics instead of JSON blob
+                        self._publish_metrics(values)
                 except Exception as e:
                     log.error(f"Error reading meter or publishing: {e}")
 
@@ -122,3 +141,19 @@ class KamstrupDaemon(multiprocessing.Process):
             log.info("Daemon interrupted")
         finally:
             self.cleanup()
+    
+    def _publish_metrics(self, values):
+        """
+        Publish individual metrics to separate MQTT topics.
+        
+        Args:
+            values: Dictionary of metric name -> value from heat meter
+        """
+        for metric_name, metric_value in values.items():
+            try:
+                # Convert metric value to string
+                message = str(metric_value)
+                self.mqtt_handler_instance.publish(metric_name, message)
+                log.debug(f"Published {metric_name}: {message}")
+            except Exception as e:
+                log.error(f"Failed to publish metric {metric_name}: {e}")
