@@ -9,7 +9,7 @@ import multiprocessing
 import time
 
 from kamstrup2mqtt.config import load_config, get_mqtt_config, get_serial_config, get_kamstrup_config, KAMSTRUP_PARAM_META
-from kamstrup2mqtt.reader import kamstrup_parser
+from kamstrup2mqtt.parser import kamstrup_parser
 from kamstrup2mqtt.mqtt import mqtt_handler
 
 log = logging.getLogger(__name__)
