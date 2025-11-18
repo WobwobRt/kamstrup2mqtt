@@ -172,6 +172,8 @@ class mqtt_handler(object):
             entity_name = meta.get("name", param_name.replace("_", " ").title())
             entity_unit = meta.get("unit")
             entity_icon = meta.get("icon", "mdi:gauge")
+            entity_device_class = meta.get("device_class")
+            entity_state_class = meta.get("state_class")
             
             discovery_topic = f"{ha_prefix}/sensor/kamstrup_{param_name}/config"
             
@@ -190,6 +192,12 @@ class mqtt_handler(object):
             
             if entity_icon:
                 discovery_payload["icon"] = entity_icon
+
+            if entity_device_class:
+                discovery_payload["device_class"] = entity_device_class
+
+            if entity_state_class:
+                discovery_payload["state_class"] = entity_state_class
             
             try:
                 self.mqtt_client.publish(
