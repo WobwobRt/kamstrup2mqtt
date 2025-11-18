@@ -8,7 +8,7 @@ import logging
 import multiprocessing
 import time
 
-from kamstrup2mqtt.config import load_config, get_mqtt_config, get_serial_config, get_kamstrup_config, KAMSTRUP_PARAM_META
+from kamstrup2mqtt.config import load_config, get_mqtt_config, get_serial_config, get_kamstrup_config, get_kamstrup_param_meta
 from kamstrup2mqtt.parser import kamstrup_parser
 from kamstrup2mqtt.mqtt import mqtt_handler
 
@@ -121,9 +121,10 @@ class KamstrupDaemon(multiprocessing.Process):
                     # Publish HA discovery once after first successful connection
                     if not ha_discovery_published and self.mqtt_handler_instance and self.mqtt_handler_instance.is_connected:
                         ha_prefix = self.config.get("homeassistant", {}).get("discovery_prefix", "homeassistant")
+                        param_meta = get_kamstrup_param_meta()
                         self.mqtt_handler_instance.publish_ha_discovery(
                             ha_prefix=ha_prefix,
-                            param_meta=KAMSTRUP_PARAM_META
+                            param_meta=param_meta
                         )
                         ha_discovery_published = True
                         log.info("Home Assistant discovery published")

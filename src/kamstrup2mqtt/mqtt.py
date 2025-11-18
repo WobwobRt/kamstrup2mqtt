@@ -154,14 +154,16 @@ class mqtt_handler(object):
         Args:
             ha_prefix: Home Assistant discovery prefix (default: homeassistant)
             entity_type: Type of entity (default: sensor)
-            param_meta: Dictionary of parameter_name -> {name, unit, icon} metadata
+            param_meta: Dictionary of parameter_name -> {name, unit, icon} metadata.
+                       If None, will be loaded from parser module.
         """
         if not self.is_connected:
             log.warning("Cannot publish HA discovery: not connected to MQTT")
             return
         
         if param_meta is None:
-            param_meta = {}
+            from .config import get_kamstrup_param_meta
+            param_meta = get_kamstrup_param_meta()
         
         device_info = self.get_device_info()
         
