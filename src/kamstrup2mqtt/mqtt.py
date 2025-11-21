@@ -33,7 +33,7 @@ class mqtt_handler(object):
         try:
             # Create client with client_id
             client_id = self.paho_config.pop("client_id")
-            self.mqtt_client = paho.Client(paho.CallbackAPIVersion.VERSION1, client_id, True)
+            self.mqtt_client = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id, True)
             
             # Register connection callbacks for state tracking
             self.mqtt_client.on_connect = self._on_connect
@@ -72,7 +72,7 @@ class mqtt_handler(object):
         except Exception as e:
             log.error(f"Failed to connect to MQTT: {e}")
     
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc, properties):
         """Callback for when the client connects to the broker."""
         if rc == 0:
             self.is_connected = True
