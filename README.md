@@ -1,10 +1,11 @@
 # Kamstrup2MQTT
 
 A Python daemon that reads data from a Kamstrup heat meter and publishes it to an MQTT broker. Designed to work both as a standalone Linux service and as a Docker container.
+Based on the terrific work of Matthijs Visser.
 
 ## Features
 
-- **Real-time meter reading**: Continuously polls your Kamstrup heat meter
+- **Periodic meter reading**: Periodically polls your Kamstrup heat meter
 - **MQTT integration**: Publishes meter data to any MQTT broker
 - **Flexible connectivity**: Supports both serial ports and network connections (socket)
 - **TLS/SSL support**: Secure MQTT connections with certificate authentication
@@ -19,7 +20,7 @@ A Python daemon that reads data from a Kamstrup heat meter and publishes it to a
 
 - Python 3.8+
 - MQTT broker (e.g., Mosquitto)
-- Kamstrup meter with accessible serial port or network interface
+- Serial adapter to read the Kamstrup meter (local on /dev/... or remote via ser2net for example)
 
 ### Installation
 
@@ -38,6 +39,7 @@ pip install -r requirements.txt
 
 4. Run the daemon:
 ```bash
+cd src/
 python -m kamstrup2mqtt
 ```
 
@@ -186,6 +188,8 @@ docker run -d \
   kamstrup2mqtt
 ```
 
+Or pull from Docker Hub: wobwobrt/kamstrup2mqtt:latest
+
 #### Using Docker Compose:
 
 Create `docker-compose.yml`:
@@ -195,7 +199,7 @@ version: '3.8'
 
 services:
   kamstrup2mqtt:
-    build: .
+    image: wobwobrt/kamstrup2mqtt:latest
     container_name: kamstrup2mqtt
     restart: always
     environment:
@@ -312,32 +316,7 @@ docker-compose down
 docker-compose up -d
 ```
 
-## Architecture
-
-```
-kamstrup2mqtt/
-├── __main__.py         # Entry point, logging setup
-├── config.py           # Configuration management
-├── daemon.py           # Main daemon process
-├── mqtt.py             # MQTT handler (paho-mqtt wrapper)
-├── reader.py           # Kamstrup meter reader
-└── config.yaml         # Configuration file
-```
-
 ## Development
-
-### Running Tests
-
-```bash
-pytest tests/
-```
-
-### Code Style
-
-```bash
-black src/
-flake8 src/
-```
 
 ## License
 
@@ -354,12 +333,3 @@ Contributions are welcome! Please:
 ## Support
 
 For issues and questions, please open an issue on GitHub.
-
-## Changelog
-
-### v1.0.0
-- Initial release
-- MQTT integration
-- Docker support
-- Comprehensive logging
-- TLS/SSL support
