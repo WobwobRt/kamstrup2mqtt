@@ -81,6 +81,7 @@ class KamstrupDaemon(multiprocessing.Process):
                          "(expected 'url' or 'com_port').")
         except Exception as e:
             log.error(f"Failed to initialize heat meter: {e}")
+            sys.exit(1)
 
     def signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully."""

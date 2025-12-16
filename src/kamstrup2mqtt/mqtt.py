@@ -5,6 +5,7 @@
 import logging
 import json
 import paho.mqtt.client as paho
+import sys
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class mqtt_handler(object):
             
         except Exception as e:
             log.error(f"Failed to connect to MQTT: {e}")
+            sys.exit(1)
     
     def _on_connect(self, client, userdata, flags, rc, properties):
         """Callback for when the client connects to the broker."""
