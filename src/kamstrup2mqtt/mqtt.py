@@ -1,6 +1,3 @@
-#!/usr/bin/python
-#
-# MIT License
 #
 # Copyright (c) 2022 Matthijs Visser
 #
@@ -10,10 +7,10 @@
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,13 +18,16 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-# 
+#
 # ------------------------------------------------------------------------------
-# Modified by Arnoud Hensen: Improved logging, home assistant integration, 
+# Modified by Arnoud Hensen: Improved logging, home assistant integration,
 # exception handling, ...
 
 import logging
 import json
+import time
+import threading
+import queue
 import paho.mqtt.client as paho
 import sys
 
@@ -35,11 +35,11 @@ log = logging.getLogger(__name__)
 
 
 class mqtt_handler(object):
-    
+
     def __init__(self, paho_config):
         """
         Initialize MQTT handler with paho-mqtt compatible config.
-        
+
         Args:
             paho_config: Dictionary from config.get_mqtt_paho_config()
         """
@@ -47,34 +47,44 @@ class mqtt_handler(object):
         self.mqtt_client = None
         self.is_connected = False
         self.qos = self.paho_config.pop("qos", 0)
+        self.clean_session = self.paho_config.pop("clean_session", False)
         self.retain = self.paho_config.pop("retain", False)
         self.topic = self.paho_config.pop("topic", "kamstrup")
         self.device_id = self.paho_config.pop("device_id", "kamstrup_meter")
         self.device_name = self.paho_config.pop("device_name", "Kamstrup Meter")
         self.enabled_parameters = self.paho_config.pop("enabled_parameters", [])
-    
+
+        # Queue to retain messages while disconnected
+        self._message_queue = queue.Queue(maxsize=500)
+        self._queue_worker_thread = None
+        self._shutdown = False
+
+        # Reconnection config
+        self._reconnect_delay = 5 # seconds between reconnect attempts
+        self._reconnect_max_delay = 120 # cap backoff at 2 minutes
+
     def connect(self):
         """Connect to MQTT broker using paho-mqtt."""
         try:
             # Create client with client_id
             client_id = self.paho_config.pop("client_id")
-            self.mqtt_client = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id, True)
-            
+            self.mqtt_client = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id, self.clean_session)
+
             # Register connection callbacks for state tracking
             self.mqtt_client.on_connect = self._on_connect
             self.mqtt_client.on_disconnect = self._on_disconnect
-            
+
             # Set Last Will Testament (LWT) so broker knows when client goes offline unexpectedly
             will_topic = f"{self.topic}/status"
             self.mqtt_client.will_set(will_topic, payload="offline", qos=1, retain=True)
-            
+
             # Set authentication if provided
             if "username" in self.paho_config and "password" in self.paho_config:
                 username = self.paho_config.pop("username")
                 password = self.paho_config.pop("password")
                 self.mqtt_client.username_pw_set(username, password)
                 log.info(f"MQTT authentication enabled for user: {username}")
-            
+
             # Set TLS if provided
             if "tls_params" in self.paho_config:
                 tls_params = self.paho_config.pop("tls_params")
@@ -82,25 +92,38 @@ class mqtt_handler(object):
                 self.mqtt_client.tls_set(**tls_params)
                 self.mqtt_client.tls_insecure_set(tls_insecure)
                 log.info("MQTT TLS enabled")
-            
+
             # Connect with remaining parameters (broker, port, keepalive)
-            broker = self.paho_config.pop("broker")
-            port = self.paho_config.pop("port")
-            keepalive = self.paho_config.pop("keepalive", 60)
-            
-            self.mqtt_client.connect(broker, port, keepalive)
+            self._broker = self.paho_config.pop("broker")
+            self._port = self.paho_config.pop("port")
+            self._keepalive = self.paho_config.pop("keepalive", 60)
+
+            # Enable paho's built-in automatic reconnection with exponential backoff
+            self.mqtt_client.reconnect_delay_set(
+                min_delay=self._reconnect_delay,
+                max_delay=self._reconnect_max_delay
+            )
+
+            self.mqtt_client.connect(self._broker, self._port, self._keepalive)
             self.mqtt_client.loop_start()
-            
-            log.info(f"Connecting to MQTT at: {broker}:{port} (keepalive={keepalive}s)")
+
+            log.info(f"Connecting to MQTT at: {self._broker}:{self._port} (keepalive={self._keepalive}s)")
             log.info(f"Settings: QoS level = {self.qos}, retain = {self.retain}")
-            
+
+            # Start the background worker that drains the queue when connected
+            self._shutdown = False
+            self._queue_worker_thread = threading.Thread(
+                target=self._queue_worker, daemon=True, name="mqtt-queue-worker"
+            )
+            self._queue_worker_thread.start()
+
         except Exception as e:
             log.error(f"Failed to connect to MQTT: {e}")
             sys.exit(1)
-    
-    def _on_connect(self, client, userdata, flags, rc, properties):
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
         """Callback for when the client connects to the broker."""
-        if rc == 0:
+        if reason_code == 0:
             self.is_connected = True
             log.info("MQTT client connected successfully")
             # Publish online status
@@ -110,18 +133,68 @@ class mqtt_handler(object):
                 log.error(f"Failed to publish online status: {e}")
         else:
             self.is_connected = False
-            log.error(f"MQTT connection failed with code {rc}")
-    
-    def _on_disconnect(self, client, userdata, rc):
+            log.error(f"MQTT connection failed with reason code {reason_code}")
+
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         """Callback for when the client disconnects from the broker."""
         self.is_connected = False
-        if rc != 0:
-            log.warning(f"Unexpected disconnection from MQTT (code {rc}), will auto-reconnect")
+        if reason_code != 0:
+            log.warning(
+                f"Unexpected disconnection from MQTT (code {reason_code}). "
+                f"Paho will auto-reconnect (backoff {self._reconnect_delay}–{self._reconnect_max_delay}s)"
+            )
         else:
-            log.info("Disconnected from MQTT broker")
-    
+            log.info("Disconnected from MQTT broker cleanly")
+
+    def _queue_worker(self):
+        """
+        Background thread: drain the message queue whenever connected.
+        Sleeps briefly when offline so it doesn't spin, then retries.
+        """
+        log.debug("MQTT queue worker started")
+        while not self._shutdown:
+            if not self.is_connected:
+                time.sleep(1)
+                continue
+
+            try:
+                # Block up to 1 s so the loop stays responsive to _shutdown
+                full_topic, message = self._message_queue.get(timeout=1)
+            except queue.Empty:
+                continue
+
+            try:
+                log.info(f"Publishing '{full_topic}' '{message}'")
+                info = self.mqtt_client.publish(full_topic, message, self.qos, self.retain)
+                info.wait_for_publish()
+                self._message_queue.task_done()
+            except Exception as e:
+                log.warning(f"Publish failed ({e}), re-queuing message")
+                # Put the message back at the front by draining and rebuilding isn't
+                # trivial with Queue, so we just put it back (it goes to the back, 
+                # acceptable for periodic sensor data)
+                self._requeue(full_topic, message)
+                time.sleep(2)  # brief pause before retrying
+
+        log.debug("MQTT queue worker stopped")
+
+    def _requeue(self, full_topic, message):
+        """Re-add a failed message to the queue, dropping the oldest if full."""
+        try:
+            self._message_queue.put_nowait((full_topic, message))
+        except queue.Full:
+            try:
+                dropped_topic, dropped_msg = self._message_queue.get_nowait()
+                log.warning(f"Queue full — dropped oldest message on '{dropped_topic}'")
+                self._message_queue.put_nowait((full_topic, message))
+            except queue.Empty:
+                pass
+
     def disconnect(self):
         """Disconnect from MQTT broker."""
+        self._shutdown = True
+        if self._queue_worker_thread:
+            self._queue_worker_thread.join(timeout=5)
         try:
             if self.mqtt_client:
                 self.mqtt_client.disconnect()
@@ -129,15 +202,22 @@ class mqtt_handler(object):
             log.error(f"Failed to disconnect from MQTT: {e}")
 
     def publish(self, topic, message):
-        """Publish message to MQTT topic."""
+        """Enqueue a message for publishing (non-blocking)."""
         full_topic = self.create_topic(topic.lower())
-        
+        try:
+            self._message_queue.put_nowait((full_topic, message))
+            if not self.is_connected:
+                log.debug(f"Offline — queued '{full_topic}' ({self._message_queue.qsize()} in queue)")
+        except queue.Full:
+            log.warning(f"Message queue full — dropping oldest to make room for '{full_topic}'")
+            self._requeue(full_topic, message)
+        """
         if not self.mqtt_client or not self.mqtt_client.is_connected():
             broker = self.paho_config.get("broker", "unknown")
             port = self.paho_config.get("port", "unknown")
             log.warning(f"Cannot publish to MQTT: not connected to broker at {broker}:{port}")
             return
-        
+
         try:
             log.info(f"Publishing '{full_topic}' '{message}'")
             mqtt_info = self.mqtt_client.publish(full_topic, message, self.qos, self.retain)
@@ -146,6 +226,7 @@ class mqtt_handler(object):
             log.error(f"Value error: {e}")
         except TypeError as e:
             log.error(f"Type error: {e}")
+        """
 
     def subscribe(self, topic):
         """Subscribe to MQTT topic."""
@@ -158,11 +239,11 @@ class mqtt_handler(object):
     def create_topic(self, data):
         """Create full topic path."""
         return f"{self.topic}/{data}"
-    
+
     def get_device_info(self):
         """
         Get Home Assistant device info for this meter.
-        
+
         Returns:
             dict: Device information for Home Assistant discovery
         """
@@ -172,11 +253,11 @@ class mqtt_handler(object):
             "manufacturer": "Kamstrup",
             "model": "Multical 402"
         }
-    
+
     def publish_ha_discovery(self, ha_prefix="homeassistant", entity_type="sensor", param_meta=None):
         """
         Publish Home Assistant MQTT discovery messages for configured entities.
-        
+
         Args:
             ha_prefix: Home Assistant discovery prefix (default: homeassistant)
             entity_type: Type of entity (default: sensor)
@@ -186,13 +267,13 @@ class mqtt_handler(object):
         if not self.is_connected:
             log.warning("Cannot publish HA discovery: not connected to MQTT")
             return
-        
+
         if param_meta is None:
             from .config import get_kamstrup_param_meta
             param_meta = get_kamstrup_param_meta()
-        
+
         device_info = self.get_device_info()
-        
+
         # Only publish discovery for enabled parameters
         for param_name in self.enabled_parameters:
             # Get metadata for this parameter, or use defaults
@@ -202,9 +283,9 @@ class mqtt_handler(object):
             entity_icon = meta.get("icon", "mdi:gauge")
             entity_device_class = meta.get("device_class")
             entity_state_class = meta.get("state_class")
-            
+
             discovery_topic = f"{ha_prefix}/sensor/kamstrup_{param_name}/config"
-            
+
             discovery_payload = {
                 "name": entity_name,
                 "unique_id": f"kamstrup_{param_name}",
@@ -214,10 +295,10 @@ class mqtt_handler(object):
                 "payload_not_available": "offline",
                 "device": device_info,
             }
-            
+
             if entity_unit:
                 discovery_payload["unit_of_measurement"] = entity_unit
-            
+
             if entity_icon:
                 discovery_payload["icon"] = entity_icon
 
@@ -226,7 +307,7 @@ class mqtt_handler(object):
 
             if entity_state_class:
                 discovery_payload["state_class"] = entity_state_class
-            
+
             try:
                 self.mqtt_client.publish(
                     discovery_topic,

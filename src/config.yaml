@@ -3,6 +3,7 @@ mqtt:
     port: 1883
     client: kamstrup
     topic: kamstrup
+    clean_session: False
     device_id: kamstrup_meter
     device_name: Kamstrup Meter
     qos: 0

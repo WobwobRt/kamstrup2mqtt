@@ -16,7 +16,7 @@ def load_config(config_path="config.yaml"):
     
     Environment variables take precedence over config file values.
     Supported environment variables:
-    - MQTT_HOST, MQTT_PORT, MQTT_CLIENT, MQTT_TOPIC, MQTT_QOS, MQTT_RETAIN
+    - MQTT_HOST, MQTT_PORT, MQTT_CLIENT, MQTT_CLEAN_SESSION, MQTT_TOPIC, MQTT_QOS, MQTT_RETAIN
     - MQTT_USERNAME, MQTT_PASSWORD, MQTT_AUTHENTICATION
     - MQTT_TLS_ENABLED, MQTT_TLS_CA_CERT, MQTT_TLS_CERT, MQTT_TLS_KEY, MQTT_TLS_KEY_PASSWORD, MQTT_TLS_INSECURE, MQTT_TLS_VERSION
     - SERIAL_COM_PORT
@@ -92,6 +92,8 @@ def _apply_env_overrides(config):
         config["mqtt"]["client"] = os.getenv("MQTT_CLIENT")
     if "MQTT_TOPIC" in os.environ:
         config["mqtt"]["topic"] = os.getenv("MQTT_TOPIC")
+    if "MQTT_CLEAN_SESSION" in os.environ:
+        config["mqtt"]["clean_session"] = os.getenv("MQTT_CLEAN_SESSION")
     if "MQTT_QOS" in os.environ:
         config["mqtt"]["qos"] = int(os.getenv("MQTT_QOS"))
     if "MQTT_RETAIN" in os.environ:
@@ -154,6 +156,7 @@ def get_mqtt_config(config):
         "broker": mqtt_config.get("host", "localhost"),
         "port": mqtt_config.get("port", 1883),
         "client_id": mqtt_config.get("client", "kamstrup"),
+        "clean_session": mqtt_config.get("clean_session", False),
         "keepalive": 60,
         "device_id": mqtt_config.get("device_id", "kamstrup_meter"),
         "device_name": mqtt_config.get("device_name", "Kamstrup Meter"),
